@@ -1,5 +1,6 @@
 package com.example.shop.chaos;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChaosController {
 
     public record ScenarioView(String id, String title, String description, String intensityHint,
-                               boolean enabled, int intensity) {}
+                               boolean enabled, int intensity, Instant autoOffAt) {}
 
     public record Update(Boolean enabled, Integer intensity) {}
 
@@ -48,7 +49,7 @@ public class ChaosController {
         return Scenario.fromId(id)
                 .map(s -> {
                     boolean enabled = update.enabled() != null ? update.enabled() : state.enabled(s);
-                    state.set(s, enabled, update.intensity());
+                    state.set(s, enabled, update.intensity(), Boolean.TRUE.equals(update.enabled()));
                     return ResponseEntity.ok(view(s, state.get(s)));
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -62,6 +63,6 @@ public class ChaosController {
 
     private static ScenarioView view(Scenario s, ChaosState.Setting setting) {
         return new ScenarioView(s.id(), s.title(), s.description(), s.intensityHint(),
-                setting.enabled(), setting.intensity());
+                setting.enabled(), setting.intensity(), setting.expiresAt());
     }
 }

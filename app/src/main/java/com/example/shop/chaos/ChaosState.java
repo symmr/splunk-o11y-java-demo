@@ -1,44 +1,74 @@
 package com.example.shop.chaos;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
  * In-memory switchboard for the failure scenarios. State is lost on restart on purpose:
  * after a memory-leak OOM the app comes back healthy.
+ *
+ * Scenarios switch themselves off after {@code shop.chaos.auto-off-minutes} so a forgotten
+ * scenario does not keep generating load, log volume and ingest cost. Explicitly switching a
+ * scenario on (again) restarts its timer; changing only the intensity keeps it. Expiry is checked lazily on every read (the app is read
+ * constantly by traffic and the sidecars), so no background thread or scheduled span is needed.
  */
 @Component
 public class ChaosState {
 
-    public record Setting(boolean enabled, int intensity) {}
+    private static final Logger log = LoggerFactory.getLogger(ChaosState.class);
+
+    public record Setting(boolean enabled, int intensity, Instant expiresAt) {}
 
     private final Map<Scenario, Setting> settings = new EnumMap<>(Scenario.class);
     private final Map<Scenario, Consumer<Setting>> listeners = new EnumMap<>(Scenario.class);
+    private final Duration autoOff;
 
-    public ChaosState() {
+    public ChaosState(@Value("${shop.chaos.auto-off-minutes:30}") long autoOffMinutes) {
+        this.autoOff = autoOffMinutes > 0 ? Duration.ofMinutes(autoOffMinutes) : null;
         for (Scenario s : Scenario.values()) {
-            settings.put(s, new Setting(false, s.defaultIntensity()));
+            settings.put(s, new Setting(false, s.defaultIntensity(), null));
         }
     }
 
-    public synchronized Setting get(Scenario s) {
-        return settings.get(s);
+    public Setting get(Scenario s) {
+        expireDue();
+        synchronized (this) {
+            return settings.get(s);
+        }
     }
 
-    public synchronized Map<Scenario, Setting> snapshot() {
-        return new EnumMap<>(settings);
+    public Map<Scenario, Setting> snapshot() {
+        expireDue();
+        synchronized (this) {
+            return new EnumMap<>(settings);
+        }
     }
 
     public void set(Scenario s, boolean enabled, Integer intensity) {
+        set(s, enabled, intensity, enabled);
+    }
+
+    public void set(Scenario s, boolean enabled, Integer intensity, boolean restartTimer) {
         Setting updated;
         Consumer<Setting> listener;
         synchronized (this) {
-            int i = intensity == null ? settings.get(s).intensity() : Math.max(1, Math.min(100, intensity));
-            updated = new Setting(enabled, i);
+            Setting current = settings.get(s);
+            int i = intensity == null ? current.intensity() : Math.max(1, Math.min(100, intensity));
+            Instant expiresAt = !enabled || autoOff == null ? null
+                    : restartTimer || current.expiresAt() == null ? Instant.now().plus(autoOff)
+                    : current.expiresAt();
+            updated = new Setting(enabled, i, expiresAt);
             settings.put(s, updated);
             listener = listeners.get(s);
         }
@@ -69,5 +99,24 @@ public class ChaosState {
     /** True for roughly {@code percent}% of calls. */
     public static boolean chance(int percent) {
         return ThreadLocalRandom.current().nextInt(100) < percent;
+    }
+
+    private void expireDue() {
+        if (autoOff == null) {
+            return;
+        }
+        List<Scenario> due = new ArrayList<>();
+        Instant now = Instant.now();
+        synchronized (this) {
+            settings.forEach((s, setting) -> {
+                if (setting.enabled() && setting.expiresAt() != null && now.isAfter(setting.expiresAt())) {
+                    due.add(s);
+                }
+            });
+        }
+        for (Scenario s : due) {
+            log.info("Chaos scenario {} switched off automatically after {} minutes", s.id(), autoOff.toMinutes());
+            set(s, false, null);
+        }
     }
 }

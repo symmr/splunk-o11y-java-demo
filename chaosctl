@@ -7,20 +7,23 @@
 #   ./chaosctl set <scenario> <intensity>
 #   ./chaosctl list
 #
+# Scenarios switch off automatically (CHAOS_AUTO_OFF_MINUTES, default 30);
+# running "on" again restarts the timer.
+#
 # CHAOS_URL defaults to http://localhost:52731.
 set -euo pipefail
 
 BASE="${CHAOS_URL:-http://localhost:52731}/chaos/api"
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
 pretty() {
   if command -v jq >/dev/null 2>&1; then
     jq -r '(if type == "array" then .[] else . end)
-           | "\(if .enabled then "ON " else "off" end)  \(.id | . + (" " * (18 - length)))  intensity=\(.intensity)\t\(.title)"'
+           | "\(if .enabled then "ON " else "off" end)  \(.id | . + (" " * (18 - length)))  intensity=\(.intensity)\t\(.title)\(if .enabled and .autoOffAt then "  (auto-off \(.autoOffAt | sub("\\.[0-9]+";"") | fromdateiso8601 | strflocaltime("%H:%M")))" else "" end)"'
   else
     cat; echo
   fi

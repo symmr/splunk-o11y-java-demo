@@ -19,6 +19,9 @@ spring:
       connection-timeout: 2000
 
 shop:
+  chaos:
+    # Scenarios switch themselves off after this many minutes (0 = never).
+    auto-off-minutes: ${CHAOS_AUTO_OFF_MINUTES:30}
   payment:
     url: ${PAYMENT_URL:http://localhost:8081}
     timeout-ms: 1000

@@ -29,6 +29,7 @@ Splunk Observability Cloud の **APM サービスビュー**から、次の2点�
 | `payment-gateway` | 外部決済APIの代役。計装していないので、APMでは推論サービス `payment-gateway` として表示される |
 | `noisy-neighbor` | CPUを食うバッチ（プロセス名は `noisy-batch`）。`app` と同じコアに、高いCPU優先度で載せている |
 | `otel-collector` | Splunk Distribution of OTel Collector。`hostmetrics`（process 含む）、`docker_stats`、`postgresql` の各レシーバーでメトリクスを集め、ログは HEC に転送する |
+| `db-janitor` | 負荷生成が入れた注文のうち、`DB_RETENTION_MINUTES`（既定 60 分）より古いものを 10 分ごとに削除する。DB が初期データのサイズのまま保たれるので、日数が経っても障害の効き方が変わらない。psql を直接実行するので APM には出ない |
 | `loadgen` | k6。約17 req/s の定常トラフィックを流す（`LOAD_MULTIPLIER` で倍率を変更） |
 
 ## 前提
@@ -63,6 +64,8 @@ docker compose up -d --build
 | `SERVICE_NAME` / `DEPLOYMENT_ENV` / `DEMO_HOST_NAME` | APM 上のサービス名、環境名、ホスト名 |
 | `DEMO_CPUSET` | `app` と `noisy-neighbor` を載せる CPU コア（既定 `0`）。`0,1` のように複数指定もできる |
 | `LOAD_MULTIPLIER` | 負荷の倍率 |
+| `CHAOS_AUTO_OFF_MINUTES` | ON にした障害が自動で OFF になるまでの分数（既定 30、`0` で無効） |
+| `DB_RETENTION_MINUTES` | 負荷生成が入れた注文を残しておく分数（既定 60） |
 | `APP_PORT` | app とコントロール画面をホストに公開するポート（既定 `52731`）。`127.0.0.1:52731` にするとホストの外からは届かなくなる |
 
 ## EC2 で動かす
@@ -87,7 +90,7 @@ docker compose up -d --build
 > **T 系（t3 / t4g など）の注意**: cpu-hotspot、noisy-neighbor、slow-query は CPU を使い続けるので、CPU クレジットを消費します。クレジットが尽きると、インスタンス全体が遅くなります。デモの障害と区別できなくなるので、T 系を使うなら Unlimited モードにしてください。
 
 - **AMI**: Ubuntu 24.04 LTS（x86_64）。Arm（Graviton）でも動くはずですが、確認していません
-- **ストレージ**: gp3 20GB 以上。イメージが約 2GB、DB が約 1GB
+- **ストレージ**: gp3 20GB 以上。イメージが約 2GB、DB が約 1GB。コンテナのログは各コンテナ 10MB × 3 世代でローテーションされ、注文データは db-janitor が削除するので、長期間動かしても増え続けない
 - **ネットワーク**: アウトバウンドで `ingest.<realm>.signalfx.com:443` と Splunk Enterprise の HEC（例 `:8088`）に届くこと
 
 ### セットアップ
@@ -150,6 +153,7 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 `jq` があれば表示が整形されます（なくても動きます）。
 
 - `/chaos/**` へのリクエストは Collector で捨てているので、APM には出ません
+- ON にした障害は `CHAOS_AUTO_OFF_MINUTES`（既定 30 分）で自動的に OFF になります。消し忘れによる負荷や、ログの取り込み量の増加を防ぐためです。もう一度 ON にするとタイマーが延長され、強度の変更だけではタイマーは変わりません。残り時間は画面と `./chaosctl status` に表示されます
 - 障害の状態は app のメモリ上だけに持っています。app が再起動するとすべて OFF に戻ります（memory-leak で OOM になったときも同様）
 
 ## 障害パターン一覧
@@ -229,5 +233,6 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 | ログが Splunk Enterprise に来ない | HEC の URL、トークン、index の権限。自己署名証明書なら `SPLUNK_HEC_TLS_INSECURE=true` |
 | サービスビューにインフラのメトリクスが出ない | APM とホストメトリクスの `host.name` は、Collector がどちらも `DEMO_HOST_NAME` に揃えている。過去に別のホスト名で送ったデータが残っていないか |
 | Database Monitoring にデータが出ない | ライセンスと realm の対応状況。`docker compose down -v` で DB を作り直したか。Collector のログに `postgresql` レシーバーの接続エラーが出ていないか |
+| 障害がいつの間にか OFF になっている | 自動 OFF です。延長するにはもう一度 ON にする。長いデモでは `CHAOS_AUTO_OFF_MINUTES` を増やす |
 | `docker_stats` のエラー | Docker Engine が 25 未満だと API 1.44 に対応していない。`collector/config.yaml` の `api_version` を下げる |
 | `noisy-neighbor` を ON にしたら操作不能になった | 強度を下げる。最悪でも 30 秒で自動停止する。`docker compose stop noisy-neighbor` でも止められる |

@@ -68,7 +68,7 @@ function render(scenarios) {
     card.querySelector(".title").textContent = s.title;
     card.querySelector(".id").textContent = s.id;
     card.querySelector(".desc").textContent = s.description;
-    card.querySelector(".hint").textContent = "intensity: " + s.intensityHint;
+    card.querySelector(".hint").textContent = "intensity: " + s.intensityHint + autoOffText(s);
     const toggle = card.querySelector("input[type=checkbox]");
     const range = card.querySelector("input[type=range]");
     const out = card.querySelector("output");
@@ -80,6 +80,12 @@ function render(scenarios) {
     toggle.addEventListener("change", () => update(s.id, { enabled: toggle.checked, intensity: Number(range.value) }));
     list.appendChild(card);
   }
+}
+
+function autoOffText(s) {
+  if (!s.enabled || !s.autoOffAt) return "";
+  const min = Math.max(0, Math.ceil((new Date(s.autoOffAt) - Date.now()) / 60000));
+  return ` ／ あと約${min}分で自動OFF（ONし直すと延長）`;
 }
 
 async function update(id, body) {

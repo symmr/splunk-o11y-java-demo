@@ -2,6 +2,13 @@ name: o11y-demo
 
 x-app-cpus: &demo-cpuset ${DEMO_CPUSET:-0}
 
+# Rotate container logs so log-noise cannot fill the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -26,6 +33,38 @@ services:
       interval: 5s
       timeout: 3s
       retries: 60
+    logging: *default-logging
+    restart: unless-stopped
+
+  # Keeps the database at its seeded size: deletes orders placed by the load generator
+  # once they are older than DB_RETENTION_MINUTES. Runs psql directly, so it never shows up in APM.
+  db-janitor:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: shop
+      PGPASSWORD: shop
+      PGDATABASE: shop
+      RETENTION_MINUTES: ${DB_RETENTION_MINUTES:-60}
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          psql -q -v ON_ERROR_STOP=1 -v minutes="$$RETENTION_MINUTES" <<'SQL' || echo "db-janitor: cleanup failed"
+        WITH old AS (
+          SELECT id FROM orders WHERE id > 300000 AND created_at < now() - make_interval(mins => :minutes)
+        ), items AS (
+          DELETE FROM order_items WHERE order_id IN (SELECT id FROM old)
+        )
+        DELETE FROM orders WHERE id IN (SELECT id FROM old);
+        SQL
+          sleep 600
+        done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   app:
@@ -52,11 +91,13 @@ services:
       SPLUNK_PROFILER_CALL_STACK_INTERVAL: "1000"
       # Database Monitoring <-> APM correlation (sets application_name per JDBC session).
       OTEL_INSTRUMENTATION_SPLUNK_JDBC_ENABLED: "true"
+      CHAOS_AUTO_OFF_MINUTES: ${CHAOS_AUTO_OFF_MINUTES:-30}
     depends_on:
       postgres:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    logging: *default-logging
     restart: unless-stopped
 
   payment-gateway:
@@ -64,6 +105,7 @@ services:
     image: o11y-demo/payment-gateway:latest
     environment:
       CHAOS_URL: http://app:8080/chaos/api/scenarios/external-latency
+    logging: *default-logging
     restart: unless-stopped
 
   noisy-neighbor:
@@ -74,6 +116,7 @@ services:
     cpu_shares: 10240
     environment:
       CHAOS_URL: http://app:8080/chaos/api/scenarios/noisy-neighbor
+    logging: *default-logging
     restart: unless-stopped
 
   otel-collector:
@@ -97,6 +140,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging: *default-logging
     restart: unless-stopped
 
   loadgen:
@@ -109,6 +153,7 @@ services:
       - ./loadgen:/scripts:ro
     depends_on:
       - app
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:
