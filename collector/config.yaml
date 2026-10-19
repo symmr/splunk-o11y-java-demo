@@ -5,6 +5,16 @@
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+  # Registers this Collector in Splunk Observability Cloud > Data Management > Fleet Management.
+  opamp/splunk_o11y:
+    agent_description:
+      include_resource_attributes: true
+    server:
+      http:
+        endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v1/opamp"
+        polling_interval: 30s
+        headers:
+          X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
 
 receivers:
   otlp:
@@ -113,7 +123,7 @@ exporters:
       insecure_skip_verify: ${env:SPLUNK_HEC_TLS_INSECURE}
 
 service:
-  extensions: [health_check]
+  extensions: [health_check, opamp/splunk_o11y]
   pipelines:
     traces:
       receivers: [otlp]

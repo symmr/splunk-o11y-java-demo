@@ -120,7 +120,7 @@ services:
     restart: unless-stopped
 
   otel-collector:
-    image: quay.io/signalfx/splunk-otel-collector:${SPLUNK_OTEL_COLLECTOR_VERSION:-0.161.0}
+    image: quay.io/signalfx/splunk-otel-collector:${SPLUNK_OTEL_COLLECTOR_VERSION:-0.163.0}
     command: ["--config=/etc/otel/config.yaml"]
     user: "0:0"
     pid: host

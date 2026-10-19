@@ -28,7 +28,7 @@ Splunk Observability Cloud の **APM サービスビュー**から、次の2点�
 | `postgres` | 商品5千件、顧客2万件、注文30万件、注文明細100万件。`orders.customer_id` と `order_items.product_id` には**わざとインデックスを張っていない**。Database Monitoring 用に `pg_stat_statements` と監視ユーザー `otel` を用意している |
 | `payment-gateway` | 外部決済APIの代役。計装していないので、APMでは推論サービス `payment-gateway` として表示される |
 | `noisy-neighbor` | CPUを食うバッチ（プロセス名は `noisy-batch`）。`app` と同じコアに、高いCPU優先度で載せている |
-| `otel-collector` | Splunk Distribution of OTel Collector。`hostmetrics`（process 含む）、`docker_stats`、`postgresql` の各レシーバーでメトリクスを集め、ログは HEC に転送する |
+| `otel-collector` | Splunk Distribution of OTel Collector（既定 0.163.0。`.env` の `SPLUNK_OTEL_COLLECTOR_VERSION` で変更）。`hostmetrics`（process 含む）、`docker_stats`、`postgresql` の各レシーバーでメトリクスを集め、ログは HEC に転送する。OpAMP 拡張（`opamp/splunk_o11y`）で Observability Cloud の Fleet Management に登録される |
 | `db-janitor` | 負荷生成が入れた注文のうち、`DB_RETENTION_MINUTES`（既定 60 分）より古いものを 10 分ごとに削除する。DB が初期データのサイズのまま保たれるので、日数が経っても障害の効き方が変わらない。psql を直接実行するので APM には出ない |
 | `loadgen` | k6。約17 req/s の定常トラフィックを流す（`LOAD_MULTIPLIER` で倍率を変更） |
 
@@ -302,6 +302,7 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 | ログが Splunk Enterprise に来ない | HEC の URL、トークン、index の権限。自己署名証明書なら `SPLUNK_HEC_TLS_INSECURE=true` |
 | サービスビューにインフラのメトリクスが出ない | APM とホストメトリクスの `host.name` は、Collector がどちらも `DEMO_HOST_NAME` に揃えている。過去に別のホスト名で送ったデータが残っていないか |
 | Database Monitoring にデータが出ない | ライセンスと realm の対応状況。`docker compose down -v` で DB を作り直したか。Collector のログに `postgresql` レシーバーの接続エラーが出ていないか |
+| Fleet Management に Collector が出ない | `collector/config.yaml` の `service.extensions` に `opamp/splunk_o11y` があるか。Collector のバージョンが 0.158.0 以上か（0.151.0〜0.157 は `--feature-gates=+splunk.opamp.enabled` が必要）。トークンの realm と Fleet Management が有効なアカウントか。登録まで 1〜2 分かかる |
 | 障害がいつの間にか OFF になっている | 自動 OFF です。延長するにはもう一度 ON にする。長いデモでは `CHAOS_AUTO_OFF_MINUTES` を増やす |
 | `docker_stats` のエラー | Docker Engine が 25 未満だと API 1.44 に対応していない。`collector/config.yaml` の `api_version` を下げる |
 | `noisy-neighbor` を ON にしたら操作不能になった | 強度を下げる。最悪でも 30 秒で自動停止する。`docker compose stop noisy-neighbor` でも止められる |
