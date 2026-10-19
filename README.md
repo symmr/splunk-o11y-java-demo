@@ -176,6 +176,75 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 
 各シナリオで Splunk のどの画面をどう辿るかは [docs/demo-script.md](docs/demo-script.md) にまとめています。
 
+## 応用: 複数の障害を同時に起こす
+
+障害は同時に ON にできます。組み合わせによっては足し算では済まず、単独より大きく悪化します。
+
+下の数値はすべて実測値です。測定条件は、4 コアのホスト、`DEMO_CPUSET=0`、既定の負荷（`LOAD_MULTIPLIER=1`）です。正常時は各 API が 20ms 前後、注文が 90ms 前後です。
+
+コントロール画面の「応用: 組み合わせ例」からも、ボタン1つで同じ設定を ON にできます。ボタンは、ほかの障害をいったんすべて OFF にしてから適用します。
+
+### 1. 原因が2つ（DB と外部 API）
+
+```bash
+./chaosctl on slow-query
+./chaosctl on external-latency -i 20
+```
+
+- 症状: 検索が約 2.4s、注文が約 0.7s になる。ほかの API は正常
+- 見どころ: 遅いエンドポイントが2本に分かれている。検索は Database Monitoring の実行計画で `Seq Scan`、注文は Service Map の `payment-gateway` と、別々の画面で別々の原因にたどり着く
+- 注意: external-latency は既定の 30 ではなく 20 にする。slow-query 中は Postgres がホストの CPU を約 3.8 コア使うので、30 だと注文の DB 処理も遅れる（約 3.6s、半数が 502）。そうなると2つの原因が混ざって見える
+
+### 2. 原因が2つ（コードとインフラ）
+
+```bash
+./chaosctl on cpu-hotspot -i 30
+./chaosctl on noisy-neighbor -i 50
+```
+
+- 症状: 全 API が 3〜4 倍遅くなり、商品詳細は約 0.18s になる
+- 見どころ: CPU プロファイルには `PriceCalculator` が出るので、それだけで「コードが原因」と結論しがち。実際はホストの CPU を `noisy-batch` も食っている。片方だけ直しても完全には戻らない、という話ができる
+
+### 3. 連鎖で DB が全滅
+
+```bash
+./chaosctl on slow-query
+./chaosctl on pool-exhaustion
+```
+
+- 症状: 検索は 10 回中 8 回が 503。ほかの API も約 1s になり、一部が 503。Postgres の CPU は約 290%
+- 見どころ: slow-query が Postgres の CPU を使い切るので、pool-exhaustion の集計クエリも遅くなり、接続を握る時間が延びる。Database Monitoring では、`Seq Scan` の実行計画と、`idle in transaction` のセッションが同時に見える
+
+### 4. 一気に OOM
+
+```bash
+./chaosctl on gc-pressure
+./chaosctl on memory-leak
+```
+
+- 症状: 約 45 秒で OOM になって再起動する。memory-leak 単独なら数分〜10 分かかる
+- 見どころ: ヒープ 256MB のうち、gc-pressure が常時約 96MB を握っている。そのため、リークに使える残りが少ない
+- 注意: 再起動すると、すべての障害が OFF に戻る
+
+### 5. ノイズに埋もれたエラー（未計測）
+
+```bash
+./chaosctl on log-noise
+./chaosctl on external-latency
+```
+
+- 想定: 遅延はそれぞれ単独のときと同程度のはず
+- 見どころ: 決済失敗の ERROR（`Checkout failed`）が、毎秒 100 行超の WARN に埋もれる。ログ検索だけでは見つけにくいが、エラーのトレースから関連ログに飛べば一発でたどり着く
+
+### やってはいけない組み合わせ
+
+**cpu-hotspot と noisy-neighbor を既定の強度のまま重ねる**のは避けてください。
+
+- 実測では、全 API が 5〜20 秒になるか、タイムアウトしました
+- アプリが応答しなくなるので、コントロール画面も `chaosctl` も効かなくなる
+- 止めるには `docker compose stop noisy-neighbor` を実行する。約 30 秒待てば自動でも止まる
+- 重ねるときは、上の例 2 の強度にする
+
 ## API
 
 | メソッドとパス | 内容 |

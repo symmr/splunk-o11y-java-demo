@@ -31,6 +31,13 @@
   .switch input:checked + span { background:var(--on); }
   .switch input:checked + span::after { transform:translateX(20px); }
   #status { color:var(--muted); font-size:12px; }
+  details.presets { max-width:960px; margin:0 auto 12px; padding:0 16px; }
+  details.presets summary { cursor:pointer; font-weight:600; padding:6px 0; }
+  .preset { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .preset p { margin:4px 0 0; color:var(--muted); }
+  .preset button { white-space:nowrap; flex:none; }
+  .preset code { font-size:12px; }
+  .warn { border-color:var(--on); }
 </style>
 </head>
 <body>
@@ -38,9 +45,63 @@
   <h1>Chaos Control <span id="status"></span></h1>
   <button id="reset">すべてOFF</button>
 </header>
+<details class="presets">
+  <summary>応用: 組み合わせ例（実測値は4コアのホスト、既定の負荷。ボタンは他の障害をOFFにしてから適用）</summary>
+  <div id="presets" style="display:grid; gap:8px; margin-top:8px;"></div>
+</details>
 <main id="list"></main>
 <script>
 const api = "/chaos/api";
+const presets = [
+  { title: "原因が2つ（DBと外部API）", set: { "slow-query": 100, "external-latency": 20 },
+    note: "検索 約2.4s・注文 約0.7s。検索はDB Monitoringの実行計画、注文はService Mapの payment-gateway と、別々の原因に辿り着く" },
+  { title: "原因が2つ（コードとインフラ）", set: { "cpu-hotspot": 30, "noisy-neighbor": 50 },
+    note: "全APIが3〜4倍。flame graphの PriceCalculator だけで結論しがちだが、ホストCPUを noisy-batch も食っている" },
+  { title: "連鎖でDB全滅", set: { "slow-query": 100, "pool-exhaustion": 80 },
+    note: "検索は8割が503、他APIも約1s＋一部503。実行計画の Seq Scan と idle in transaction が同時に見える" },
+  { title: "一気にOOM", set: { "gc-pressure": 50, "memory-leak": 20 },
+    note: "約45秒でOOM→再起動（単独だと数分〜10分）。再起動で全障害がOFFに戻る" },
+  { title: "ノイズに埋もれたエラー", set: { "log-noise": 50, "external-latency": 30 },
+    note: "決済失敗のERRORが大量のWARNに埋もれる。トレースから関連ログに飛べば一発（未計測）" },
+];
+
+function renderPresets() {
+  const box = document.getElementById("presets");
+  const warn = document.createElement("section");
+  warn.className = "card warn";
+  warn.innerHTML = "<strong>やってはいけない:</strong> cpu-hotspot と noisy-neighbor を既定の強度のまま重ねると、アプリが応答しなくなり、この画面も効かなくなります。止めるには <code>docker compose stop noisy-neighbor</code>（30秒ほどで自動停止もします）。";
+  box.appendChild(warn);
+  for (const p of presets) {
+    const card = document.createElement("section");
+    card.className = "card preset";
+    const text = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = p.title;
+    const set = document.createElement("code");
+    set.textContent = Object.entries(p.set).map(([id, i]) => `${id}=${i}`).join("  ");
+    const note = document.createElement("p");
+    note.textContent = p.note;
+    text.append(title, set, note);
+    const btn = document.createElement("button");
+    btn.textContent = "この組み合わせでON";
+    btn.addEventListener("click", async () => {
+      status.textContent = "更新中…";
+      await fetch(api + "/reset", { method: "POST" });
+      for (const [id, intensity] of Object.entries(p.set)) {
+        await fetch(`${api}/scenarios/${id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: true, intensity })
+        });
+      }
+      status.textContent = "";
+      load();
+    });
+    card.append(text, btn);
+    box.appendChild(card);
+  }
+}
+renderPresets();
 const list = document.getElementById("list");
 const status = document.getElementById("status");
 
