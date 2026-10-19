@@ -117,6 +117,9 @@ exporters:
     # The host metadata sync runs once, on the first metrics batch this exporter sees, and needs host.name on it.
     # Keep metrics without host.name (Database Monitoring) off this exporter: see signalfx/dbmon.
     sync_host_metadata: true
+    # APM service view > Runtime metrics (Java) > GC activity reads jvm.gc.duration as a native histogram.
+    # Without this the exporter splits it into jvm.gc.duration_count/_sum/_bucket and the chart stays empty.
+    send_otlp_histograms: true
     root_path: /hostfs
     correlation:
 
