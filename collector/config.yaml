@@ -83,6 +83,15 @@ processors:
       - key: host.name
         value: "${env:DEMO_HOST_NAME}"
         action: upsert
+  # The signalfx exporter turns resource attributes into dimensions, and a dimension value over
+  # 256 characters makes the whole datapoint get dropped. process.command_line of long-running
+  # commands (java with agent flags, sh -c "...") exceeds that, so those processes lost every process.* metric.
+  transform/truncate-dimensions:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - truncate_all(attributes, 256)
   # Keep the chaos control plane (UI, CLI, sidecar polling) out of APM.
   filter/drop-chaos:
     error_mode: ignore
@@ -146,7 +155,7 @@ service:
       exporters: [otlp_http/apm, signalfx]
     metrics:
       receivers: [otlp, host_metrics, docker_stats]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, transform/truncate-dimensions, resource/host, batch]
       exporters: [signalfx]
     # The two dbmon pipelines must use the same processors in the same order.
     metrics/dbmon:
