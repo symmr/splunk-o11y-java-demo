@@ -141,6 +141,12 @@ services:
       SPLUNK_HEC_TLS_INSECURE: ${SPLUNK_HEC_TLS_INSECURE:-false}
       DEMO_HOST_NAME: ${DEMO_HOST_NAME:-o11y-demo-host}
       SPLUNK_MEMORY_TOTAL_MIB: "1024"
+      # smartagent/processlist (Infrastructure > host > Processes tab) reads the host's /proc via /hostfs.
+      HOST_PROC: /hostfs/proc
+      HOST_ETC: /hostfs/etc
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_SYS: /hostfs/sys
     volumes:
       - ./collector/config.yaml:/etc/otel/config.yaml:ro
       - /:/hostfs:ro

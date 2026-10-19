@@ -269,7 +269,7 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
   - AlwaysOn Profiling
   - 関連ログ
 - **Tag Spotlight**: `customer.tier`、`payment.method`、`coupon.type`、`http.route` などで絞り込む
-- **Infrastructure → Hosts → `o11y-demo-host`**: プロセス別の CPU（`process.cpu.utilization`、`process.executable.name`）を見る
+- **Infrastructure → Hosts → `o11y-demo-host`**: プロセス別の CPU（`process.cpu.utilization`、`process.executable.name`）を見る。ホスト詳細の **Processes タブ**（プロセス一覧）は `smartagent/processlist` が送る。Collector に `HOST_PROC` などの環境変数と `logs/processlist` パイプラインがあること
 - **ログ（Splunk Enterprise）**: `index=<SPLUNK_HEC_INDEX> sourcetype="otel:shop-app"`。各イベントに `trace_id` と `span_id` が付く
 
 ## Secure Application（ランタイムの脆弱性と攻撃）

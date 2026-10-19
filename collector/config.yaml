@@ -46,6 +46,10 @@ receivers:
           process.memory.utilization:
             enabled: true
 
+  # Process list for Infrastructure > Hosts > <host> > Processes tab (sent as events through the signalfx exporter).
+  smartagent/processlist:
+    type: processlist
+
   docker_stats:
     endpoint: unix:///var/run/docker.sock
     api_version: "1.44"  # Docker Engine 25+
@@ -137,6 +141,10 @@ service:
     metrics/dbmon:
       receivers: [postgresql]
       processors: [memory_limiter, batch]
+      exporters: [signalfx]
+    logs/processlist:
+      receivers: [smartagent/processlist]
+      processors: [memory_limiter, resource/host, batch]
       exporters: [signalfx]
     logs/dbmon:
       receivers: [postgresql]
