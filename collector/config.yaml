@@ -100,7 +100,18 @@ exporters:
   signalfx:
     access_token: "${env:SPLUNK_ACCESS_TOKEN}"
     realm: "${env:SPLUNK_REALM}"
+    # Host properties (Infrastructure host dimension) and APM service <-> host correlation (Related Content).
+    # The host metadata sync runs once, on the first metrics batch this exporter sees, and needs host.name on it.
+    # Keep metrics without host.name (Database Monitoring) off this exporter: see signalfx/dbmon.
     sync_host_metadata: true
+    root_path: /hostfs
+    correlation:
+
+  # Database Monitoring metrics. Separate instance so its first batch (no host.name) does not
+  # consume the one-shot host metadata sync of the exporter above.
+  signalfx/dbmon:
+    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    realm: "${env:SPLUNK_REALM}"
 
   # Database Monitoring events (query samples, top queries, execution plans).
   otlp_http/dbmon:
@@ -141,7 +152,7 @@ service:
     metrics/dbmon:
       receivers: [postgresql]
       processors: [memory_limiter, batch]
-      exporters: [signalfx]
+      exporters: [signalfx/dbmon]
     logs/processlist:
       receivers: [smartagent/processlist]
       processors: [memory_limiter, resource/host, batch]
