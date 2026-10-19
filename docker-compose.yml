@@ -80,7 +80,10 @@ services:
       DB_PASSWORD: shop
       PAYMENT_URL: http://payment-gateway:8081
       OTEL_SERVICE_NAME: ${SERVICE_NAME:-shop-app}
-      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_ENV:-o11y-demo},service.version=1.0.0
+      # service.namespace is required by Secure Application.
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_ENV:-o11y-demo},service.version=1.0.0,service.namespace=${SERVICE_NAMESPACE:-o11y-demo-shop}
+      # Secure Application: report attack events (Java 8-23).
+      JAVA_TOOL_OPTIONS: "-Dargento.allow.security.events=true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_METRICS_EXPORTER: otlp
       OTEL_LOGS_EXPORTER: otlp

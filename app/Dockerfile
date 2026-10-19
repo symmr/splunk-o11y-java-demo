@@ -8,7 +8,9 @@ RUN mvn -q -B package -DskipTests
 FROM eclipse-temurin:21-jre
 ARG SPLUNK_OTEL_JAVA_VERSION=2.31.3
 WORKDIR /app
-ADD https://repo.maven.apache.org/maven2/com/splunk/splunk-otel-javaagent/${SPLUNK_OTEL_JAVA_VERSION}/splunk-otel-javaagent-${SPLUNK_OTEL_JAVA_VERSION}.jar /otel/splunk-otel-javaagent.jar
+# Secure Application build of the agent (drop-in for splunk-otel-javaagent: APM + runtime library/vulnerability data).
+# The file name must keep "splunk-otel-javaagent" in it.
+ADD https://repo.maven.apache.org/maven2/com/splunk/splunk-otel-javaagent-csa/${SPLUNK_OTEL_JAVA_VERSION}/splunk-otel-javaagent-csa-${SPLUNK_OTEL_JAVA_VERSION}.jar /otel/splunk-otel-javaagent.jar
 COPY --from=build /src/target/shop-app.jar /app/shop-app.jar
 EXPOSE 8080
 # Small fixed heap so gc-pressure and memory-leak show up quickly; die on OOM and let Docker restart us.

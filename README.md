@@ -272,6 +272,19 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 - **Infrastructure → Hosts → `o11y-demo-host`**: プロセス別の CPU（`process.cpu.utilization`、`process.executable.name`）を見る
 - **ログ（Splunk Enterprise）**: `index=<SPLUNK_HEC_INDEX> sourcetype="otel:shop-app"`。各イベントに `trace_id` と `span_id` が付く
 
+## Secure Application（ランタイムの脆弱性と攻撃）
+
+[Splunk Secure Application](https://help.splunk.com/en/splunk-observability-cloud/monitor-application-security/introduction-to-splunk-secure-application)（Splunk APM のアドオン）に対応しています。Observability Cloud で Secure Application のライセンスが有効なときだけ、Runtime vulnerabilities、Libraries、Attacks の各ページにデータが出ます。ライセンスがなくても APM は通常どおり動きます。
+
+| 場所 | 設定 |
+|---|---|
+| `app/Dockerfile` | エージェントを `splunk-otel-javaagent-csa`（APM と Secure Application を兼ねる Java エージェント）に差し替え。バージョンは `SPLUNK_OTEL_JAVA_VERSION` で、標準エージェントと同じ番号 |
+| `docker-compose.yml` | `OTEL_RESOURCE_ATTRIBUTES` に `service.namespace`（必須。既定 `o11y-demo-shop`、`.env` の `SERVICE_NAMESPACE` で変更）を追加。`JAVA_TOOL_OPTIONS` で `-Dargento.allow.security.events=true` を指定し、攻撃イベントを送る |
+
+- 実行中のライブラリ一覧は、app の起動時と、その後 24 時間ごとに送られます
+- 攻撃の検出は Java 8〜23 が対象です（このデモは Java 21）
+- csa 版エージェントに替えたことで、README に載せた障害パターンの実測値がずれる可能性があります。実測値は標準エージェントでの値です
+
 ## Database Monitoring（クエリサンプルと実行計画）
 
 [Splunk Database Monitoring](https://help.splunk.com/en/splunk-observability-cloud/monitor-databases/introduction-to-splunk-database-monitoring) で、PostgreSQL のクエリサンプル、上位クエリ、**実行計画（EXPLAIN）**を見られるようにしてあります。
