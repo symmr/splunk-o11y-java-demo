@@ -151,6 +151,9 @@ services:
       HOST_SYS: /hostfs/sys
     volumes:
       - ./collector/config.yaml:/etc/otel/config.yaml:ro
+      # The collector image only knows uid 999, so every process.owner lookup (root, ubuntu, postgres, k6, ...) failed
+      # and the attribute was left off. This file maps the uids seen on the host and in the demo containers.
+      - ./collector/passwd:/etc/passwd:ro
       - /:/hostfs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
