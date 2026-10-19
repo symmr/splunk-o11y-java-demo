@@ -41,15 +41,22 @@ receivers:
     api_version: "1.44"  # Docker Engine 25+
     collection_interval: 10s
 
+  # Splunk Database Monitoring: DB metrics plus query samples and top queries
+  # (with execution plans) as events. Keep the default intervals and limits.
   postgresql:
     endpoint: postgres:5432
     transport: tcp
-    username: shop
-    password: shop
+    username: otel
+    password: otel
     databases: [shop]
     collection_interval: 10s
     tls:
       insecure: true
+    events:
+      db.server.query_sample:
+        enabled: true
+      db.server.top_query:
+        enabled: true
 
 processors:
   memory_limiter:
@@ -81,6 +88,13 @@ exporters:
     realm: "${env:SPLUNK_REALM}"
     sync_host_metadata: true
 
+  # Database Monitoring events (query samples, top queries, execution plans).
+  otlp_http/dbmon:
+    logs_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v3/event"
+    headers:
+      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+      X-splunk-instrumentation-library: dbmon
+
   # AlwaysOn Profiling data (arrives from the Java agent as OTLP logs).
   splunk_hec/profiling:
     token: "${env:SPLUNK_ACCESS_TOKEN}"
@@ -106,9 +120,18 @@ service:
       processors: [memory_limiter, filter/drop-chaos, resource/host, batch]
       exporters: [otlp_http/apm, signalfx]
     metrics:
-      receivers: [otlp, host_metrics, docker_stats, postgresql]
+      receivers: [otlp, host_metrics, docker_stats]
       processors: [memory_limiter, resource/host, batch]
       exporters: [signalfx]
+    # The two dbmon pipelines must use the same processors in the same order.
+    metrics/dbmon:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [signalfx]
+    logs/dbmon:
+      receivers: [postgresql]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/dbmon]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource/host, batch]

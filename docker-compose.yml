@@ -5,6 +5,15 @@ x-app-cpus: &demo-cpuset ${DEMO_CPUSET:-0}
 services:
   postgres:
     image: postgres:16-alpine
+    # pg_stat_statements is required by Database Monitoring (top queries / execution plans).
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - track_activity_query_size=4096
     environment:
       POSTGRES_DB: shop
       POSTGRES_USER: shop
@@ -41,6 +50,8 @@ services:
       SPLUNK_PROFILER_ENABLED: "true"
       SPLUNK_PROFILER_MEMORY_ENABLED: "true"
       SPLUNK_PROFILER_CALL_STACK_INTERVAL: "1000"
+      # Database Monitoring <-> APM correlation (sets application_name per JDBC session).
+      OTEL_INSTRUMENTATION_SPLUNK_JDBC_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy

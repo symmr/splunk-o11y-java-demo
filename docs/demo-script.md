@@ -50,6 +50,8 @@
 3. **原因**:
    - Database Query Performance: 上記の SQL が実行回数と合計時間の両方で突出している
    - Collector の `postgresql` レシーバーのメトリクスで、DB 側の負荷（ブロック読み取りなど）も上がっている
+   - Database Monitoring → PostgreSQL インスタンス → Queries: 同じ SQL が上位に来る。実行計画（Explain plan）を開くと、`order_items` に `Seq Scan`（Parallel Seq Scan）がかかっている。**インデックスがないことが、実行計画で裏付けられる**
+   - クエリサンプルからは、そのクエリを発行した APM トレースに飛べる（`application_name` 経由の相関）
    - 正体: `order_items.product_id` にインデックスがない。さらに非正規化済みの `sold_count` を使わず、毎回集計している
 
 ## 4. DB コネクションプール枯渇 (`pool-exhaustion`)
@@ -63,6 +65,7 @@
 3. **原因**:
    - Runtime metrics と接続プールのメトリクス（`db.client.connections.*`、pool `shop-pool`）: 使用中が上限の 10 に張り付き、接続待ちが発生している
    - 注文のトレース: トランザクション内で順位集計クエリ（`SELECT COUNT(*) + 1 FROM (SELECT customer_id, SUM(total) ...`）が走り、その後も数秒間接続を握っている
+   - Database Monitoring: 順位集計クエリの実行計画で、`orders` の全件スキャンと全顧客分の集計（Seq Scan → Aggregate）が見える。クエリサンプルには `idle in transaction`（接続を握ったまま何もしていない）のセッションがずらりと並び、プールを占有している犯人が見える
    - Database Query Performance: 順位集計クエリが重い。**遅いクエリと長いトランザクションの組み合わせが、接続プールを食い潰した**、という流れで説明できる
 
 ## 5. 外部 API の遅延とリトライの嵐 (`external-latency`)

@@ -25,7 +25,7 @@ Splunk Observability Cloud の **APM サービスビュー**から、次の2点�
 | コンテナ | 役割 |
 |---|---|
 | `app` | Java 21 / Spring Boot 3.5 のショップ（モノリス）。Splunk OTel Java agent でトレース、JVMメトリクス、AlwaysOn Profiling（CPUとメモリ）、ログを送る |
-| `postgres` | 商品5千件、顧客2万件、注文30万件、注文明細100万件。`orders.customer_id` と `order_items.product_id` には**わざとインデックスを張っていない** |
+| `postgres` | 商品5千件、顧客2万件、注文30万件、注文明細100万件。`orders.customer_id` と `order_items.product_id` には**わざとインデックスを張っていない**。Database Monitoring 用に `pg_stat_statements` と監視ユーザー `otel` を用意している |
 | `payment-gateway` | 外部決済APIの代役。計装していないので、APMでは推論サービス `payment-gateway` として表示される |
 | `noisy-neighbor` | CPUを食うバッチ（プロセス名は `noisy-batch`）。`app` と同じコアに、高いCPU優先度で載せている |
 | `otel-collector` | Splunk Distribution of OTel Collector。`hostmetrics`（process 含む）、`docker_stats`、`postgresql` の各レシーバーでメトリクスを集め、ログは HEC に転送する |
@@ -37,6 +37,7 @@ Splunk Observability Cloud の **APM サービスビュー**から、次の2点�
 - Splunk Observability Cloud: realm と **Ingest トークン**
 - Splunk Enterprise: HEC の URL、HEC トークン、ログ用の index（例: `o11y_demo`）。HEC トークンがその index に書き込めること
 - Log Observer Connect で、Observability Cloud から上記の Splunk Enterprise を参照できるよう設定済みであること
+- （任意）Splunk Database Monitoring のライセンス。対応リージョンの realm であること。なくても他の機能は動く
 
 ## 起動
 
@@ -50,6 +51,7 @@ docker compose up -d --build
 - コントロール画面: http://localhost:8080/chaos/
 - APM 上の名前: サービスは `shop-app`、環境は `o11y-demo`、ホストは `o11y-demo-host`。いずれも `.env` で変更できます
 - 停止は `docker compose down`。DB も作り直すなら `docker compose down -v`
+- 以前のバージョンで作った DB ボリュームが残っていると、Database Monitoring 用の拡張と監視ユーザーが作られません。一度 `docker compose down -v` してから起動してください
 
 ### `.env` の主な項目
 
@@ -132,6 +134,27 @@ CHAOS_URL=http://demo-vm:8080 ./chaosctl status   # 別ホストの app を操�
 - **Infrastructure → Hosts → `o11y-demo-host`**: プロセス別の CPU（`process.cpu.utilization`、`process.executable.name`）を見る
 - **ログ（Splunk Enterprise）**: `index=<SPLUNK_HEC_INDEX> sourcetype="otel:shop-app"`。各イベントに `trace_id` と `span_id` が付く
 
+## Database Monitoring（クエリサンプルと実行計画）
+
+[Splunk Database Monitoring](https://help.splunk.com/en/splunk-observability-cloud/monitor-databases/introduction-to-splunk-database-monitoring) で、PostgreSQL のクエリサンプル、上位クエリ、**実行計画（EXPLAIN）**を見られるようにしてあります。
+
+| 場所 | 設定 |
+|---|---|
+| PostgreSQL（`docker-compose.yml`, `db/init/00-monitoring.sql`） | `shared_preload_libraries=pg_stat_statements`、拡張 `pg_stat_statements` を作成。監視ユーザー `otel` に `pg_monitor` とアプリのテーブルへの `SELECT` を付与（EXPLAIN に必要） |
+| Collector（`collector/config.yaml`） | `postgresql` レシーバーで `db.server.query_sample` と `db.server.top_query` を有効化。`otlp_http/dbmon` で `https://ingest.<realm>.signalfx.com/v3/event` に送る。パイプラインは `metrics/dbmon` と `logs/dbmon` |
+| Java エージェント（`docker-compose.yml`） | `OTEL_INSTRUMENTATION_SPLUNK_JDBC_ENABLED=true`。JDBC の各セッションの `application_name` に traceparent が入り、DB のクエリサンプルと APM のトレースが紐付く |
+
+ローカルで Collector の出力を見て確認した内容:
+
+- 上位クエリのイベントに `postgresql.query_plan`（EXPLAIN の JSON）が付く
+- slow-query の `SELECT COALESCE(SUM(quantity), ?) FROM order_items WHERE product_id = ?` と、pool-exhaustion の順位集計クエリは、どちらもプランに `Seq Scan` が出る
+- クエリサンプルの `postgresql.application_name` が `00-<trace_id>-<span_id>-03`（traceparent）になっている
+
+注意点:
+
+- `INSERT` や `UPDATE` の EXPLAIN は、読み取り専用の監視ユーザーでは `permission denied` になります。Collector のログに毎分 `failed to explain statement` が出ますが、想定どおりの挙動です。書き込み権限は付与していません
+- 収集間隔と件数の上限は、Splunk の推奨どおり既定値のままにしています。上位クエリは 60 秒ごと、クエリサンプルは 10 秒ごとです
+
 ## トラブルシューティング
 
 | 症状 | 確認すること |
@@ -140,5 +163,6 @@ CHAOS_URL=http://demo-vm:8080 ./chaosctl status   # 別ホストの app を操�
 | プロファイルが出ない | 同じログで `splunk_hec/profiling` の送信エラーが出ていないか。APM の AlwaysOn Profiling が有効か |
 | ログが Splunk Enterprise に来ない | HEC の URL、トークン、index の権限。自己署名証明書なら `SPLUNK_HEC_TLS_INSECURE=true` |
 | サービスビューにインフラのメトリクスが出ない | APM とホストメトリクスの `host.name` は、Collector がどちらも `DEMO_HOST_NAME` に揃えている。過去に別のホスト名で送ったデータが残っていないか |
+| Database Monitoring にデータが出ない | ライセンスと realm の対応状況。`docker compose down -v` で DB を作り直したか。Collector のログに `postgresql` レシーバーの接続エラーが出ていないか |
 | `docker_stats` のエラー | Docker Engine が 25 未満だと API 1.44 に対応していない。`collector/config.yaml` の `api_version` を下げる |
 | `noisy-neighbor` を ON にしたら操作不能になった | 強度を下げる。最悪でも 30 秒で自動停止する。`docker compose stop noisy-neighbor` でも止められる |
