@@ -281,6 +281,11 @@ CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を�
 | `app/Dockerfile` | エージェントを `splunk-otel-javaagent-csa`（APM と Secure Application を兼ねる Java エージェント）に差し替え。バージョンは `SPLUNK_OTEL_JAVA_VERSION` で、標準エージェントと同じ番号 |
 | `docker-compose.yml` | `OTEL_RESOURCE_ATTRIBUTES` に `service.namespace`（必須。既定 `o11y-demo-shop`、`.env` の `SERVICE_NAMESPACE` で変更）を追加。`JAVA_TOOL_OPTIONS` で `-Dargento.allow.security.events=true` を指定し、攻撃イベントを送る |
 
+- **脆弱性のあるミドルウェア（わざと古い版）**: 実行時にロードされるので、Runtime vulnerabilities に出ます
+  - 組み込み Tomcat 10.1.34（CVE-2025-24813 ほか）
+  - PostgreSQL JDBC ドライバー 42.7.1（CVE-2024-1597）
+  - バージョンは `.env` の `DEMO_TOMCAT_VERSION` / `DEMO_POSTGRESQL_VERSION`。修正版（例: `10.1.52` / `42.7.7`）にして `docker compose up -d --build app` で再ビルドすると、指摘が消える様子を見せられる
+  - 攻撃できる経路は追加していない。古い版を載せているだけ（Tomcat の CVE-2025-24813 は、既定では無効な書き込み可能 DefaultServlet が前提）
 - 実行中のライブラリ一覧は、app の起動時と、その後 24 時間ごとに送られます
 - 攻撃の検出は Java 8〜23 が対象です（このデモは Java 21）
 - csa 版エージェントに替えたことで、README に載せた障害パターンの実測値がずれる可能性があります。実測値は標準エージェントでの値です

@@ -1,9 +1,15 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
+# Secure Application demo: deliberately old middleware with known CVEs (loaded at runtime, so the agent reports them).
+# Override these (docker-compose.yml / .env) with a fixed version to show the findings disappear.
+#   embedded Tomcat 10.1.34   -> CVE-2025-24813 and others
+#   PostgreSQL JDBC 42.7.1    -> CVE-2024-1597
+ARG TOMCAT_VERSION=10.1.34
+ARG POSTGRESQL_VERSION=42.7.1
 WORKDIR /src
 COPY pom.xml .
-RUN mvn -q -B dependency:go-offline
+RUN mvn -q -B -Dtomcat.version=${TOMCAT_VERSION} -Dpostgresql.version=${POSTGRESQL_VERSION} dependency:go-offline
 COPY src ./src
-RUN mvn -q -B package -DskipTests
+RUN mvn -q -B -Dtomcat.version=${TOMCAT_VERSION} -Dpostgresql.version=${POSTGRESQL_VERSION} package -DskipTests
 
 FROM eclipse-temurin:21-jre
 ARG SPLUNK_OTEL_JAVA_VERSION=2.31.3

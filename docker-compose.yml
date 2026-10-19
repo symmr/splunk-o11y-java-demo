@@ -68,7 +68,12 @@ services:
     restart: unless-stopped
 
   app:
-    build: ./app
+    build:
+      context: ./app
+      args:
+        # Old middleware on purpose (Secure Application demo). Set to a fixed version to remediate.
+        TOMCAT_VERSION: ${DEMO_TOMCAT_VERSION:-10.1.34}
+        POSTGRESQL_VERSION: ${DEMO_POSTGRESQL_VERSION:-42.7.1}
     image: o11y-demo/shop-app:latest
     # app and noisy-neighbor are pinned to the same core(s) so the neighbor really hurts.
     cpuset: *demo-cpuset
