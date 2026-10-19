@@ -1,0 +1,115 @@
+# Splunk OpenTelemetry Collector for the demo.
+#   traces / metrics / profiling -> Splunk Observability Cloud
+#   application logs             -> Splunk Enterprise (HEC), viewed in o11y via Log Observer Connect
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Host and per-process metrics. /hostfs is the Docker host's root filesystem and the
+  # container runs with pid: host, so every process on the host (incl. noisy-batch) is visible.
+  host_metrics:
+    root_path: /hostfs
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      load:
+      memory:
+      disk:
+      filesystem:
+      network:
+      paging:
+      processes:
+      process:
+        mute_process_all_errors: true
+        metrics:
+          process.cpu.utilization:
+            enabled: true
+          process.memory.utilization:
+            enabled: true
+
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    api_version: "1.44"  # Docker Engine 25+
+    collection_interval: 10s
+
+  postgresql:
+    endpoint: postgres:5432
+    transport: tcp
+    username: shop
+    password: shop
+    databases: [shop]
+    collection_interval: 10s
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 800
+  batch:
+  # One host.name for everything, so APM services correlate with the host/process metrics.
+  resource/host:
+    attributes:
+      - key: host.name
+        value: "${env:DEMO_HOST_NAME}"
+        action: upsert
+  # Keep the chaos control plane (UI, CLI, sidecar polling) out of APM.
+  filter/drop-chaos:
+    error_mode: ignore
+    traces:
+      span:
+        - 'IsMatch(attributes["http.route"], "^/chaos")'
+        - 'IsMatch(attributes["url.path"], "^/chaos")'
+
+exporters:
+  otlp_http/apm:
+    traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
+    headers:
+      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+
+  signalfx:
+    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    realm: "${env:SPLUNK_REALM}"
+    sync_host_metadata: true
+
+  # AlwaysOn Profiling data (arrives from the Java agent as OTLP logs).
+  splunk_hec/profiling:
+    token: "${env:SPLUNK_ACCESS_TOKEN}"
+    endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v1/log"
+    log_data_enabled: false
+
+  # Application logs to Splunk Enterprise.
+  splunk_hec/enterprise:
+    token: "${env:SPLUNK_HEC_TOKEN}"
+    endpoint: "${env:SPLUNK_HEC_URL}/services/collector"
+    index: "${env:SPLUNK_HEC_INDEX}"
+    source: otel
+    sourcetype: "otel:shop-app"
+    profiling_data_enabled: false
+    tls:
+      insecure_skip_verify: ${env:SPLUNK_HEC_TLS_INSECURE}
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/drop-chaos, resource/host, batch]
+      exporters: [otlp_http/apm, signalfx]
+    metrics:
+      receivers: [otlp, host_metrics, docker_stats, postgresql]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [signalfx]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [splunk_hec/enterprise, splunk_hec/profiling]

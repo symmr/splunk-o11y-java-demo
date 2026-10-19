@@ -1,0 +1,28 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 100
+
+spring:
+  application:
+    name: shop-app
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/shop}
+    username: ${DB_USER:shop}
+    password: ${DB_PASSWORD:shop}
+    hikari:
+      pool-name: shop-pool
+      maximum-pool-size: 10
+      minimum-idle: 10
+      # Fail fast once the pool is drained, so pool-exhaustion surfaces as errors as well as latency.
+      connection-timeout: 2000
+
+shop:
+  payment:
+    url: ${PAYMENT_URL:http://localhost:8081}
+    timeout-ms: 1000
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} trace_id=%X{trace_id} span_id=%X{span_id} - %msg%n"

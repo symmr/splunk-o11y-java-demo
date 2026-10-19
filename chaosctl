@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Toggle failure scenarios on the demo shop.
+#
+#   ./chaosctl status
+#   ./chaosctl on  <scenario> [--intensity N]
+#   ./chaosctl off <scenario|all>
+#   ./chaosctl set <scenario> <intensity>
+#   ./chaosctl list
+#
+# CHAOS_URL defaults to http://localhost:8080.
+set -euo pipefail
+
+BASE="${CHAOS_URL:-http://localhost:8080}/chaos/api"
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+pretty() {
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '(if type == "array" then .[] else . end)
+           | "\(if .enabled then "ON " else "off" end)  \(.id | . + (" " * (18 - length)))  intensity=\(.intensity)\t\(.title)"'
+  else
+    cat; echo
+  fi
+}
+
+put() {
+  curl -fsS --max-time 10 -X PUT -H 'Content-Type: application/json' -d "$2" "$BASE/scenarios/$1" | pretty
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+  status|list)
+    curl -fsS --max-time 10 "$BASE/scenarios" | pretty
+    ;;
+  on)
+    [[ $# -ge 1 ]] || usage 1
+    name="$1"; shift
+    intensity=""
+    if [[ "${1:-}" == "--intensity" || "${1:-}" == "-i" ]]; then intensity="$2"; fi
+    if [[ -n "$intensity" ]]; then
+      put "$name" "{\"enabled\":true,\"intensity\":$intensity}"
+    else
+      put "$name" '{"enabled":true}'
+    fi
+    ;;
+  off)
+    [[ $# -ge 1 ]] || usage 1
+    if [[ "$1" == "all" ]]; then
+      curl -fsS --max-time 10 -X POST "$BASE/reset" >/dev/null
+      curl -fsS --max-time 10 "$BASE/scenarios" | pretty
+    else
+      put "$1" '{"enabled":false}'
+    fi
+    ;;
+  set)
+    [[ $# -ge 2 ]] || usage 1
+    put "$1" "{\"intensity\":$2}"
+    ;;
+  -h|--help|help)
+    usage 0
+    ;;
+  *)
+    usage 1
+    ;;
+esac

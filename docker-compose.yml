@@ -1,0 +1,104 @@
+name: o11y-demo
+
+x-app-cpus: &demo-cpuset ${DEMO_CPUSET:-0}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U shop -d shop"]  # TCP: not ready while init scripts run
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+
+  app:
+    build: ./app
+    image: o11y-demo/shop-app:latest
+    # app and noisy-neighbor are pinned to the same core(s) so the neighbor really hurts.
+    cpuset: *demo-cpuset
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/shop
+      DB_USER: shop
+      DB_PASSWORD: shop
+      PAYMENT_URL: http://payment-gateway:8081
+      OTEL_SERVICE_NAME: ${SERVICE_NAME:-shop-app}
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=${DEPLOYMENT_ENV:-o11y-demo},service.version=1.0.0
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      # External dependency shows up as an inferred service on the service map.
+      OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING: payment-gateway=payment-gateway
+      SPLUNK_PROFILER_ENABLED: "true"
+      SPLUNK_PROFILER_MEMORY_ENABLED: "true"
+      SPLUNK_PROFILER_CALL_STACK_INTERVAL: "1000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  payment-gateway:
+    build: ./sidecars/payment-mock
+    image: o11y-demo/payment-gateway:latest
+    environment:
+      CHAOS_URL: http://app:8080/chaos/api/scenarios/external-latency
+    restart: unless-stopped
+
+  noisy-neighbor:
+    build: ./sidecars/noisy-neighbor
+    image: o11y-demo/noisy-neighbor:latest
+    cpuset: *demo-cpuset
+    # A batch job someone started with a much higher CPU weight than the app (default 1024).
+    cpu_shares: 10240
+    environment:
+      CHAOS_URL: http://app:8080/chaos/api/scenarios/noisy-neighbor
+    restart: unless-stopped
+
+  otel-collector:
+    image: quay.io/signalfx/splunk-otel-collector:${SPLUNK_OTEL_COLLECTOR_VERSION:-0.161.0}
+    command: ["--config=/etc/otel/config.yaml"]
+    user: "0:0"
+    pid: host
+    environment:
+      SPLUNK_REALM: ${SPLUNK_REALM:?set SPLUNK_REALM in .env}
+      SPLUNK_ACCESS_TOKEN: ${SPLUNK_ACCESS_TOKEN:?set SPLUNK_ACCESS_TOKEN in .env}
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:?set SPLUNK_HEC_URL in .env}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:?set SPLUNK_HEC_TOKEN in .env}
+      SPLUNK_HEC_INDEX: ${SPLUNK_HEC_INDEX:-main}
+      SPLUNK_HEC_TLS_INSECURE: ${SPLUNK_HEC_TLS_INSECURE:-false}
+      DEMO_HOST_NAME: ${DEMO_HOST_NAME:-o11y-demo-host}
+      SPLUNK_MEMORY_TOTAL_MIB: "1024"
+    volumes:
+      - ./collector/config.yaml:/etc/otel/config.yaml:ro
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  loadgen:
+    image: grafana/k6:${K6_VERSION:-1.0.0}
+    command: ["run", "--quiet", "/scripts/load.js"]
+    environment:
+      BASE_URL: http://app:8080
+      LOAD_MULTIPLIER: ${LOAD_MULTIPLIER:-1}
+    volumes:
+      - ./loadgen:/scripts:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
