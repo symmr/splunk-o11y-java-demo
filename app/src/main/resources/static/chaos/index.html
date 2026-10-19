@@ -38,6 +38,8 @@
   .preset button { white-space:nowrap; flex:none; }
   .preset code { font-size:12px; }
   .warn { border-color:var(--on); }
+  .autooff { max-width:928px; margin:0 auto 12px; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .autooff input { width:80px; font:inherit; padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
 </style>
 </head>
 <body>
@@ -45,6 +47,13 @@
   <h1>Chaos Control <span id="status"></span></h1>
   <button id="reset">すべてOFF</button>
 </header>
+<section class="card autooff">
+  <label for="autoOffMinutes"><strong>自動OFFまでの時間</strong></label>
+  <input id="autoOffMinutes" type="number" min="0" max="1440" step="1" value="30">
+  <span>分</span>
+  <button id="autoOffApply">設定</button>
+  <span class="hint" id="autoOffHint">ONにした時点からの時間。0で自動OFFなし。変更はこれからONにする障害に適用（動作中のタイマーは変わりません）</span>
+</section>
 <details class="presets">
   <summary>応用: 組み合わせ例（実測値は4コアのホスト、既定の負荷。ボタンは他の障害をOFFにしてから適用）</summary>
   <div id="presets" style="display:grid; gap:8px; margin-top:8px;"></div>
@@ -162,6 +171,25 @@ document.getElementById("reset").addEventListener("click", async () => {
   await fetch(api + "/reset", { method: "POST" });
   load();
 });
+
+const autoOffInput = document.getElementById("autoOffMinutes");
+async function loadSettings() {
+  const res = await fetch(api + "/settings");
+  autoOffInput.value = (await res.json()).autoOffMinutes;
+}
+async function applyAutoOff() {
+  const minutes = Math.max(0, Math.min(1440, Math.round(Number(autoOffInput.value) || 0)));
+  status.textContent = "更新中…";
+  const res = await fetch(api + "/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ autoOffMinutes: minutes })
+  });
+  autoOffInput.value = (await res.json()).autoOffMinutes;
+  status.textContent = "";
+}
+document.getElementById("autoOffApply").addEventListener("click", applyAutoOff);
+autoOffInput.addEventListener("keydown", e => { if (e.key === "Enter") applyAutoOff(); });
+loadSettings().catch(() => {});
 
 load().catch(() => status.textContent = "APIに接続できません");
 setInterval(() => document.activeElement?.type === "range" || load().catch(() => status.textContent = "APIに接続できません（再起動中？）"), 5000);

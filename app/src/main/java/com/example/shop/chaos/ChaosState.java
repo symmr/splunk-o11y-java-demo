@@ -32,13 +32,28 @@ public class ChaosState {
 
     private final Map<Scenario, Setting> settings = new EnumMap<>(Scenario.class);
     private final Map<Scenario, Consumer<Setting>> listeners = new EnumMap<>(Scenario.class);
-    private final Duration autoOff;
+    public static final long MAX_AUTO_OFF_MINUTES = 24 * 60;
+
+    /** Applied when a scenario is switched on. Can be changed at runtime from the control page; null = never. */
+    private volatile Duration autoOff;
 
     public ChaosState(@Value("${shop.chaos.auto-off-minutes:30}") long autoOffMinutes) {
-        this.autoOff = autoOffMinutes > 0 ? Duration.ofMinutes(autoOffMinutes) : null;
+        setAutoOffMinutes(autoOffMinutes);
         for (Scenario s : Scenario.values()) {
             settings.put(s, new Setting(false, s.defaultIntensity(), null));
         }
+    }
+
+    /** Minutes a scenario stays on after being switched on; 0 means it never switches off by itself. */
+    public long autoOffMinutes() {
+        Duration d = autoOff;
+        return d == null ? 0 : d.toMinutes();
+    }
+
+    /** Takes effect for scenarios switched on afterwards; timers already running are not changed. */
+    public void setAutoOffMinutes(long minutes) {
+        long m = Math.max(0, Math.min(MAX_AUTO_OFF_MINUTES, minutes));
+        this.autoOff = m > 0 ? Duration.ofMinutes(m) : null;
     }
 
     public Setting get(Scenario s) {
@@ -65,8 +80,9 @@ public class ChaosState {
         synchronized (this) {
             Setting current = settings.get(s);
             int i = intensity == null ? current.intensity() : Math.max(1, Math.min(100, intensity));
-            Instant expiresAt = !enabled || autoOff == null ? null
-                    : restartTimer || current.expiresAt() == null ? Instant.now().plus(autoOff)
+            Duration autoOffNow = autoOff;
+            Instant expiresAt = !enabled || autoOffNow == null ? null
+                    : restartTimer || current.expiresAt() == null ? Instant.now().plus(autoOffNow)
                     : current.expiresAt();
             updated = new Setting(enabled, i, expiresAt);
             settings.put(s, updated);
@@ -102,9 +118,6 @@ public class ChaosState {
     }
 
     private void expireDue() {
-        if (autoOff == null) {
-            return;
-        }
         List<Scenario> due = new ArrayList<>();
         Instant now = Instant.now();
         synchronized (this) {
@@ -115,7 +128,7 @@ public class ChaosState {
             });
         }
         for (Scenario s : due) {
-            log.info("Chaos scenario {} switched off automatically after {} minutes", s.id(), autoOff.toMinutes());
+            log.info("Chaos scenario {} switched off automatically (auto-off timer expired)", s.id());
             set(s, false, null);
         }
     }

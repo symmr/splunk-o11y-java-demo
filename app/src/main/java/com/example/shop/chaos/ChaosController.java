@@ -26,6 +26,8 @@ public class ChaosController {
 
     public record Update(Boolean enabled, Integer intensity) {}
 
+    public record Settings(long autoOffMinutes) {}
+
     private final ChaosState state;
 
     public ChaosController(ChaosState state) {
@@ -53,6 +55,18 @@ public class ChaosController {
                     return ResponseEntity.ok(view(s, state.get(s)));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Minutes until a scenario switches itself off after being turned on (0 = never). */
+    @GetMapping("/settings")
+    public Settings settings() {
+        return new Settings(state.autoOffMinutes());
+    }
+
+    @PutMapping("/settings")
+    public Settings updateSettings(@RequestBody Settings settings) {
+        state.setAutoOffMinutes(settings.autoOffMinutes());
+        return new Settings(state.autoOffMinutes());
     }
 
     @PostMapping("/reset")
