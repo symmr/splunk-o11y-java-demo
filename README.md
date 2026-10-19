@@ -48,7 +48,7 @@ docker compose up -d --build
 ```
 
 - 初回は DB の初期データ投入に 30〜60 秒かかります
-- コントロール画面: http://localhost:8080/chaos/
+- コントロール画面: http://localhost:52731/chaos/
 - APM 上の名前: サービスは `shop-app`、環境は `o11y-demo`、ホストは `o11y-demo-host`。いずれも `.env` で変更できます
 - 停止は `docker compose down`。DB も作り直すなら `docker compose down -v`
 - 以前のバージョンで作った DB ボリュームが残っていると、Database Monitoring 用の拡張と監視ユーザーが作られません。一度 `docker compose down -v` してから起動してください
@@ -63,12 +63,77 @@ docker compose up -d --build
 | `SERVICE_NAME` / `DEPLOYMENT_ENV` / `DEMO_HOST_NAME` | APM 上のサービス名、環境名、ホスト名 |
 | `DEMO_CPUSET` | `app` と `noisy-neighbor` を載せる CPU コア（既定 `0`）。`0,1` のように複数指定もできる |
 | `LOAD_MULTIPLIER` | 負荷の倍率 |
+| `APP_PORT` | app とコントロール画面をホストに公開するポート（既定 `52731`）。`127.0.0.1:52731` にするとホストの外からは届かなくなる |
+
+## EC2 で動かす
+
+### 推奨インスタンス
+
+ローカルで計測したリソース使用量は次のとおりです。
+
+- メモリ: 合計 2〜2.5GB 程度。内訳は app 約 550MB（ヒープ 256MB とエージェント）、Collector 最大 1GB、Postgres 200MB 前後、k6 約 100MB
+- CPU: slow-query を ON にすると、Postgres が並列スキャンで一時的に 3〜4 コアを使う
+
+| 用途 | インスタンス | 理由 |
+|---|---|---|
+| **推奨** | `m7i.xlarge`（4 vCPU / 16GB）または `c7i.xlarge`（4 vCPU / 8GB） | 下記参照 |
+| 最小 | `t3.large`（2 vCPU / 8GB） | 動くが、slow-query 中は DB がコアを奪い合い、ほかの障害と混ざって見える |
+
+推奨サイズを選ぶ理由:
+
+- コア 0 は app と noisy-neighbor 専用になり、DB と Collector は残り 3 コアで動く。このため、ノイジーネイバーの影響が app にだけ出る
+- バースト系でないので、CPU クレジットの影響を受けない
+
+> **T 系（t3 / t4g など）の注意**: cpu-hotspot、noisy-neighbor、slow-query は CPU を使い続けるので、CPU クレジットを消費します。クレジットが尽きると、インスタンス全体が遅くなります。デモの障害と区別できなくなるので、T 系を使うなら Unlimited モードにしてください。
+
+- **AMI**: Ubuntu 24.04 LTS（x86_64）。Arm（Graviton）でも動くはずですが、確認していません
+- **ストレージ**: gp3 20GB 以上。イメージが約 2GB、DB が約 1GB
+- **ネットワーク**: アウトバウンドで `ingest.<realm>.signalfx.com:443` と Splunk Enterprise の HEC（例 `:8088`）に届くこと
+
+### セットアップ
+
+```bash
+# Docker Engine と Compose / Buildx プラグイン（公式スクリプト）
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && newgrp docker
+
+git clone https://github.com/symmr/splunk-o11y-java-demo.git
+cd splunk-o11y-java-demo
+cp .env.example .env && vi .env   # DEMO_HOST_NAME は EC2 の名前にしておくと探しやすい
+docker compose up -d --build
+```
+
+### コントロール画面へのアクセス
+
+コントロール画面に認証はありません。どちらかの方法で、自分だけが触れるようにしてください。
+
+**A. セキュリティグループで自分の IP だけ許可する**
+
+1. インバウンドに「TCP 52731、ソース＝自分のグローバル IP/32」を追加する
+2. ブラウザで `http://<EC2のパブリックIP>:52731/chaos/` を開く
+3. 手元の CLI からは `CHAOS_URL=http://<EC2のパブリックIP>:52731 ./chaosctl status` で操作する
+
+**B. ポートを開けずにトンネル経由で使う**
+
+`.env` で `APP_PORT=127.0.0.1:52731` にしてから、手元で次のどちらかを実行します。
+
+```bash
+# SSH で転送
+ssh -L 52731:localhost:52731 ubuntu@<EC2のIP>
+
+# SSM Session Manager で転送（SSH ポートも不要）
+aws ssm start-session --target <instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["52731"],"localPortNumber":["52731"]}'
+```
+
+転送中は、手元で `http://localhost:52731/chaos/` を開くだけで操作できます。`./chaosctl` も、`CHAOS_URL` を指定せずにそのまま使えます。
 
 ## 障害の切り替え
 
 ### 画面
 
-http://localhost:8080/chaos/ のトグルで ON/OFF し、スライダーで強度（1〜100）を変えます。
+http://localhost:52731/chaos/ のトグルで ON/OFF し、スライダーで強度（1〜100）を変えます。
 
 ### CLI
 
@@ -79,7 +144,7 @@ http://localhost:8080/chaos/ のトグルで ON/OFF し、スライダーで強�
 ./chaosctl set gc-pressure 80             # 強度だけ変更
 ./chaosctl off slow-query
 ./chaosctl off all
-CHAOS_URL=http://demo-vm:8080 ./chaosctl status   # 別ホストの app を操作
+CHAOS_URL=http://<EC2のIP>:52731 ./chaosctl status   # 別ホストの app を操作
 ```
 
 `jq` があれば表示が整形されます（なくても動きます）。

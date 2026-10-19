@@ -7,10 +7,10 @@
 #   ./chaosctl set <scenario> <intensity>
 #   ./chaosctl list
 #
-# CHAOS_URL defaults to http://localhost:8080.
+# CHAOS_URL defaults to http://localhost:52731.
 set -euo pipefail
 
-BASE="${CHAOS_URL:-http://localhost:8080}/chaos/api"
+BASE="${CHAOS_URL:-http://localhost:52731}/chaos/api"
 
 usage() {
   sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
