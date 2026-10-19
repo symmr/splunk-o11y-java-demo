@@ -83,6 +83,10 @@ processors:
       - key: host.name
         value: "${env:DEMO_HOST_NAME}"
         action: upsert
+      # insert keeps the value the app already set (shop-app) and fills it in for host/process/container telemetry.
+      - key: service.namespace
+        value: "${env:SERVICE_NAMESPACE}"
+        action: insert
   # The signalfx exporter turns resource attributes into dimensions, and a dimension value over
   # 256 characters makes the whole datapoint get dropped. process.command_line of long-running
   # commands (java with agent flags, sh -c "...") exceeds that, so those processes lost every process.* metric.

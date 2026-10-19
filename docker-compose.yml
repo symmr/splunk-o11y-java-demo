@@ -140,6 +140,8 @@ services:
       SPLUNK_HEC_INDEX: ${SPLUNK_HEC_INDEX:-main}
       SPLUNK_HEC_TLS_INSECURE: ${SPLUNK_HEC_TLS_INSECURE:-false}
       DEMO_HOST_NAME: ${DEMO_HOST_NAME:-o11y-demo-host}
+      # Same value as the app's service.namespace; the collector adds it to telemetry that does not have one.
+      SERVICE_NAMESPACE: ${SERVICE_NAMESPACE:-o11y-demo-shop}
       SPLUNK_MEMORY_TOTAL_MIB: "1024"
       # smartagent/processlist (Infrastructure > host > Processes tab) reads the host's /proc via /hostfs.
       HOST_PROC: /hostfs/proc
