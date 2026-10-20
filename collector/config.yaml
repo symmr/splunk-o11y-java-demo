@@ -77,6 +77,17 @@ processors:
     check_interval: 2s
     limit_mib: 800
   batch:
+  # Same detectors as the Splunk default config (EC2 + system): adds host.id, cloud.*, host.image.id, ...
+  # The signalfx exporter builds the AWSUniqueId dimension from them. host.name is replaced just after by resource/host.
+  resource_detection:
+    detectors: [ec2, system]
+    override: true
+  # Native OTLP histograms (send_otlp_histograms) are limited to 32 buckets, as in the default config.
+  transform/limit_histogram_buckets:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - merge_histogram_buckets(32, method="limit_buckets")
   # One host.name for everything, so APM services correlate with the host/process metrics.
   resource/host:
     attributes:
@@ -158,11 +169,12 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, filter/drop-chaos, resource/host, batch]
-      exporters: [otlp_http/apm, signalfx]
+      processors: [memory_limiter, filter/drop-chaos, resource_detection, resource/host, batch]
+      # Like the default config, spans go only to APM. Trace correlation via the signalfx exporter is deprecated.
+      exporters: [otlp_http/apm]
     metrics:
       receivers: [otlp, host_metrics, docker_stats]
-      processors: [memory_limiter, transform/truncate-dimensions, resource/host, batch]
+      processors: [memory_limiter, transform/truncate-dimensions, transform/limit_histogram_buckets, resource_detection, resource/host, batch]
       exporters: [signalfx]
     # The two dbmon pipelines must use the same processors in the same order.
     metrics/dbmon:
@@ -171,7 +183,7 @@ service:
       exporters: [signalfx/dbmon]
     logs/processlist:
       receivers: [smartagent/processlist]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, resource_detection, resource/host, batch]
       exporters: [signalfx]
     logs/dbmon:
       receivers: [postgresql]
@@ -179,5 +191,5 @@ service:
       exporters: [otlp_http/dbmon]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, resource_detection, resource/host, batch]
       exporters: [splunk_hec/enterprise, splunk_hec/profiling]
